@@ -1,0 +1,44 @@
+# Answers requests to join the RoastCommons organization. The app opens an issue titled "Join request: <login>";
+# an organization owner replies "approve" (or 批准) to invite that person, or "reject" (or 拒绝) to close it.
+# Replies from anyone else are ignored. The invitation is sent with the RoastCommons GitHub App's token
+# (secrets APP_ID and APP_PRIVATE_KEY; the App needs the organization permission Members: read and write).
+name: Answer join requests
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  issues: write
+jobs:
+  answer:
+    if: github.event.issue.pull_request == null && startsWith(github.event.issue.title, 'Join request:') && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+      - name: Approve or reject
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          ORG: ${{ github.repository_owner }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          BODY: ${{ github.event.comment.body }}
+          AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          role=$(gh api "orgs/$ORG/memberships/$COMMENTER" --jq '.role + ":" + .state' 2>/dev/null || true)
+          if [ "$role" != "admin:active" ]; then echo "$COMMENTER is not an owner; ignoring"; exit 0; fi
+          word=$(printf '%s\n' "$BODY" | head -n1 | awk '{print tolower($1)}')
+          case "$word" in
+            approve|approved|批准)
+              id=$(gh api "users/$AUTHOR" --jq .id)
+              gh api -X POST "orgs/$ORG/invitations" -F invitee_id="$id" -f role=direct_member >/dev/null
+              gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" -b "Approved by $COMMENTER. $AUTHOR is invited; the app accepts the invitation by itself. 已批准，app 会自动接受邀请。"
+              gh issue close "$ISSUE" -R "$GITHUB_REPOSITORY" -r completed ;;
+            reject|rejected|拒绝)
+              gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" -b "Not approved this time. 这次没有通过。"
+              gh issue close "$ISSUE" -R "$GITHUB_REPOSITORY" -r "not planned" ;;
+            *) echo "no approve/reject in the first word; nothing to do" ;;
+          esac
