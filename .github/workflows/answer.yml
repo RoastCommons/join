@@ -33,9 +33,13 @@ jobs:
           word=$(printf '%s\n' "$BODY" | head -n1 | awk '{print tolower($1)}')
           case "$word" in
             approve|approved|批准)
-              id=$(gh api "users/$AUTHOR" --jq .id)
+              if ! id=$(gh api "users/$AUTHOR" --jq .id 2>/dev/null); then
+                # GitHub hides accounts it has flagged (often new ones): no invitation can reach them
+                gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" -b "Approved, but GitHub does not show the account $AUTHOR to others right now (new accounts are sometimes flagged), so no invitation could be sent. Check https://github.com/$AUTHOR while signed out; if it is not found, ask GitHub support (https://support.github.com) to review the account, then an owner replies approve again. 已批准，但 GitHub 目前对外隐藏了 $AUTHOR 这个账号（新账号有时会被标记），邀请发不出去。退出登录后打开 https://github.com/$AUTHOR 看看；如果显示找不到，请到 https://support.github.com 申请复核，恢复后管理员再回复一次 approve。" || true
+                exit 1
+              fi
               gh api -X POST "orgs/$ORG/invitations" -F invitee_id="$id" -f role=direct_member >/dev/null
-              gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" -b "Approved by $COMMENTER. $AUTHOR is invited; the app accepts the invitation by itself. 已批准，app 会自动接受邀请。"
+              gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" -b "Approved by $COMMENTER. $AUTHOR is invited. Open the RoastCommons app: it accepts the invitation by itself and carries on (if it is not open, it does so the next time it starts). If anything gets stuck, accept it here: https://github.com/orgs/$ORG/invitation 已批准，已发出邀请。打开 RoastCommons app，它会自动接受邀请并继续（没开着的话，下次打开时会自动接受）。如果卡住了，也可以在这里接受：https://github.com/orgs/$ORG/invitation"
               gh issue close "$ISSUE" -R "$GITHUB_REPOSITORY" -r completed ;;
             reject|rejected|拒绝)
               gh issue comment "$ISSUE" -R "$GITHUB_REPOSITORY" -b "Not approved this time. 这次没有通过。"
